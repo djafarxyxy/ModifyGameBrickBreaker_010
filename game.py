@@ -1,10 +1,13 @@
 """Inti permainan: mengatur state, input, tabrakan, dan render."""
 
+import json
+import pathlib
 import random
 
 import pygame
 
 import ui
+from effects import ParticleSystem, SoundBank, Starfield
 from entities import (
     Ball,
     BombBrick,
@@ -34,6 +37,8 @@ from settings import (
     get_font,
 )
 
+HIGHSCORE_PATH = pathlib.Path(__file__).with_name("highscore.json")
+
 
 class Game:
     def __init__(self):
@@ -51,11 +56,17 @@ class Game:
 
         self.state = "menu"
         self.score = 0
-        self.best_score = 0
+        self.best_score = self.load_high_score()
         self.bonus = 0
+        self.combo = 0
+        self.shake = 0.0
         self.lives = 3
         self.level_index = 0
         self.running = True
+
+        self.stars = Starfield()
+        self.particles = ParticleSystem()
+        self.sounds = SoundBank()
 
         self.paddle = Paddle()
         self.balls = []
@@ -97,6 +108,24 @@ class Game:
         ]
 
     # ------------------------------------------------------------------ setup
+    def load_high_score(self):
+        try:
+            with open(HIGHSCORE_PATH, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            return int(data.get("best", 0))
+        except (OSError, ValueError):
+            return 0
+
+    def save_high_score(self):
+        if self.score <= self.best_score:
+            return
+        self.best_score = self.score
+        try:
+            with open(HIGHSCORE_PATH, "w", encoding="utf-8") as file:
+                json.dump({"best": self.best_score}, file)
+        except OSError:
+            pass
+
     def make_background(self):
         surface = pygame.Surface((WIDTH, HEIGHT))
         for y in range(HEIGHT):
@@ -245,11 +274,16 @@ class Game:
     def start_level(self, index):
         self.load_level(index)
         self.reset_effects()
+        self.combo = 0
         self.paddle.rect.centerx = WIDTH // 2
         self.state = "playing"
 
     # ------------------------------------------------------------------ update
     def update(self, dt):
+        self.stars.update(dt)
+        self.particles.update(dt)
+        self.shake = max(0.0, self.shake - dt)
+
         if self.state != "playing":
             return
 
@@ -304,6 +338,8 @@ class Game:
                 powerup.apply(self)
                 self.powerups.remove(powerup)
                 self.score += 15
+                self.sounds.play("powerup")
+                self.particles.burst(powerup.rect.centerx, powerup.rect.centery, powerup.color, 14, 0.9)
 
     def update_bullets(self, dt):
         for bullet in list(self.bullets):
@@ -354,26 +390,41 @@ class Game:
             self.balls.append(ball)
 
     def lose_life(self):
+        self.combo = 0
         self.lives -= 1
+        self.sounds.play("lose")
+        self.shake = max(self.shake, 0.2)
         if self.lives <= 0:
             self.lives = 0
             self.state = "game_over"
+            self.sounds.play("gameover")
+            self.save_high_score()
         else:
             self.reset_after_life_lost()
 
     def finish_level(self):
         self.bonus = 100 * (self.level_index + 1)
         self.score += self.bonus
+        self.sounds.play("level")
         self.state = "level_clear"
 
     def destroy_brick(self, brick, drop=True):
         if brick in self.bricks:
             self.bricks.remove(brick)
-        self.score += brick.points
+        self.combo += 1
+        multiplier = min(5, 1 + self.combo // 4)
+        self.score += brick.points * multiplier
+
+        is_bomb = isinstance(brick, BombBrick)
+        color = (255, 150, 80) if is_bomb else brick.color
+        self.particles.burst(brick.rect.centerx, brick.rect.centery, color, 26 if is_bomb else 10, 1.5 if is_bomb else 1.0)
+        self.sounds.play("bomb" if is_bomb else "brick")
+
         if drop and self.bricks and len(self.powerups) < 4:
             if random.random() < self.drop_chance:
                 self.powerups.append(random_powerup(brick.rect.centerx, brick.rect.centery))
-        if isinstance(brick, BombBrick):
+        if is_bomb:
+            self.shake = max(self.shake, 0.35)
             self.explode(brick)
 
     def explode(self, bomb):
@@ -396,6 +447,8 @@ class Game:
     def next_level(self):
         if self.level_index + 1 >= len(LEVELS):
             self.state = "win"
+            self.sounds.play("win")
+            self.save_high_score()
             return
         self.start_level(self.level_index + 1)
 
@@ -405,6 +458,8 @@ class Game:
         if ball.vel_y <= 0:
             return
 
+        self.combo = 0
+        self.sounds.play("paddle")
         ball.pos_y = self.paddle.rect.top - ball.radius
         offset = (ball.pos_x - self.paddle.rect.centerx) / (self.paddle.rect.width / 2)
         offset = max(-1.0, min(1.0, offset))
@@ -428,14 +483,22 @@ class Game:
             ball.pos_x += normal[0] * 2
             ball.pos_y += normal[1] * 2
             ball.sync_rect()
-            if brick.hit():
+            if isinstance(brick, SteelBrick):
+                brick.hit()
+                self.sounds.play("steel")
+                self.particles.burst(ball.pos_x, ball.pos_y, (205, 215, 235), 6, 0.6)
+            elif brick.hit():
                 self.destroy_brick(brick)
+            else:
+                self.sounds.play("brick")
+                self.particles.burst(ball.pos_x, ball.pos_y, brick.color, 4, 0.6)
             break
 
     # ------------------------------------------------------------------ render
     def draw(self):
         screen = self.screen
         screen.blit(self.background, (0, 0))
+        self.stars.draw(screen)
 
         if self.state in ("menu", "howto"):
             ui.draw_menu(
@@ -473,6 +536,13 @@ class Game:
                     self.bonus,
                 )
 
+        if self.shake > 0:
+            frame = screen.copy()
+            strength = max(1, int(3 + 8 * self.shake / 0.35))
+            offset = (random.randint(-strength, strength), random.randint(-strength, strength))
+            screen.fill((0, 0, 0))
+            screen.blit(frame, offset)
+
         pygame.display.flip()
 
     def draw_playfield(self):
@@ -486,6 +556,7 @@ class Game:
         self.paddle.draw(self.screen)
         for ball in self.balls:
             ball.draw(self.screen)
+        self.particles.draw(self.screen)
         self.draw_effect_badges()
         self.draw_hud()
 
@@ -503,6 +574,11 @@ class Game:
         level = LEVELS[self.level_index]
         name = self.font_small.render(f"LEVEL {self.level_index + 1} - {level.name.upper()}", True, NEON)
         self.screen.blit(name, (WIDTH // 2 - name.get_width() // 2, 15))
+
+        if self.combo >= 2:
+            multiplier = min(5, 1 + self.combo // 4)
+            combo_text = self.font_tiny.render(f"COMBO x{multiplier}", True, YELLOW)
+            self.screen.blit(combo_text, (126, 27))
 
         lives_label = self.font_tiny.render("NYAWA", True, MUTED)
         self.screen.blit(lives_label, (WIDTH - 148, 5))
