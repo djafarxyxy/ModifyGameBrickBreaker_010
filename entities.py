@@ -38,6 +38,7 @@ class Paddle(GameObject):
         self.speed = 660
         self.target_width = 110
         self.keyboard_dir = 0
+        self.laser = False
 
     def handle_key(self, key, pressed):
         if key in (pygame.K_LEFT, pygame.K_a):
@@ -88,6 +89,9 @@ class Paddle(GameObject):
             width=1,
             border_radius=4,
         )
+        if self.laser:
+            for x in (self.rect.left + 8, self.rect.right - 12):
+                pygame.draw.rect(surface, (255, 138, 76), (x, self.rect.top - 6, 4, 8), border_radius=2)
 
 
 class Ball(GameObject):
@@ -109,6 +113,23 @@ class Ball(GameObject):
         self.vel_x = math.sin(angle) * self.speed
         self.vel_y = -abs(math.cos(angle) * self.speed)
         self.stuck = False
+
+    def set_velocity(self, vel_x, vel_y):
+        self.vel_x = vel_x
+        self.vel_y = vel_y
+        self.stuck = False
+
+    def scale_speed(self, factor):
+        self.vel_x *= factor
+        self.vel_y *= factor
+        # jaga kecepatan tetap masuk akal
+        speed = math.hypot(self.vel_x, self.vel_y)
+        if speed < 260:
+            self.vel_x *= 260 / speed
+            self.vel_y *= 260 / speed
+        elif speed > 900:
+            self.vel_x *= 900 / speed
+            self.vel_y *= 900 / speed
 
     def sync_rect(self):
         self.rect.center = (round(self.pos_x), round(self.pos_y))
@@ -271,6 +292,25 @@ class BombBrick(Brick):
     @property
     def explosion_radius(self):
         return 105
+
+
+class Bullet(GameObject):
+    """Peluru dari paddle laser."""
+
+    def __init__(self, x, y):
+        super().__init__(x, y, 4, 16)
+        self.speed = 780
+
+    def update(self, dt, game):
+        self.rect.y -= self.speed * dt
+        if self.rect.bottom < 0:
+            self.alive = False
+
+    def draw(self, surface):
+        glow = pygame.Surface((16, 28), pygame.SRCALPHA)
+        pygame.draw.rect(glow, (255, 138, 76, 60), glow.get_rect(), border_radius=6)
+        surface.blit(glow, (self.rect.centerx - 8, self.rect.centery - 14))
+        pygame.draw.rect(surface, (255, 214, 120), self.rect, border_radius=2)
 
 
 def circle_rect_collision(ball, rect):

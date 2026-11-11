@@ -1,25 +1,31 @@
 """Inti permainan: mengatur state, input, tabrakan, dan render."""
 
+import random
+
 import pygame
 
 import ui
 from entities import (
     Ball,
     BombBrick,
+    Bullet,
     Paddle,
     SteelBrick,
     circle_rect_collision,
     reflect,
 )
 from levels import LEVELS
+from powerups import random_powerup
 from settings import (
     BG_BOTTOM,
     BG_TOP,
     FPS,
+    GREEN,
     HEIGHT,
     HUD_HEIGHT,
     MUTED,
     NEON,
+    ORANGE,
     PINK,
     TITLE,
     WHITE,
@@ -54,6 +60,11 @@ class Game:
         self.paddle = Paddle()
         self.balls = []
         self.bricks = []
+        self.powerups = []
+        self.bullets = []
+        self.timers = {"expand": 0.0, "slow": 0.0, "laser": 0.0}
+        self.laser_cooldown = 0.0
+        self.drop_chance = 0.22
         self.top_boundary = HUD_HEIGHT
         self.load_level(0)
 
@@ -108,9 +119,17 @@ class Game:
         ball = Ball(self.paddle.rect.centerx, self.paddle.rect.top - 30, speed)
         self.balls = [ball]
 
-    def reset_after_life_lost(self):
-        self.paddle.rect.width = 110
+    def reset_effects(self):
+        self.powerups.clear()
+        self.bullets.clear()
+        self.timers = {"expand": 0.0, "slow": 0.0, "laser": 0.0}
+        self.laser_cooldown = 0.0
         self.paddle.target_width = 110
+        self.paddle.rect.width = 110
+        self.paddle.laser = False
+
+    def reset_after_life_lost(self):
+        self.reset_effects()
         self.paddle.rect.centerx = WIDTH // 2
         self.spawn_ball(LEVELS[self.level_index].speed)
 
@@ -145,9 +164,12 @@ class Game:
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                for button in self.current_buttons():
-                    if button.is_hovered(event.pos):
-                        self.do_action(button.action)
+                if self.state == "playing":
+                    self.fire_laser()
+                else:
+                    for button in self.current_buttons():
+                        if button.is_hovered(event.pos):
+                            self.do_action(button.action)
             elif event.type == pygame.KEYDOWN:
                 self.handle_keydown(event)
             elif event.type == pygame.KEYUP:
@@ -160,9 +182,11 @@ class Game:
 
         if self.state == "playing":
             if key == pygame.K_SPACE:
-                for ball in self.balls:
-                    if ball.stuck:
-                        ball.launch()
+                stuck_balls = [ball for ball in self.balls if ball.stuck]
+                if stuck_balls:
+                    stuck_balls[0].launch()
+                else:
+                    self.fire_laser()
             elif key in (pygame.K_ESCAPE, pygame.K_p):
                 self.state = "paused"
             elif key == pygame.K_r:
@@ -220,8 +244,7 @@ class Game:
 
     def start_level(self, index):
         self.load_level(index)
-        self.paddle.rect.width = 110
-        self.paddle.target_width = 110
+        self.reset_effects()
         self.paddle.rect.centerx = WIDTH // 2
         self.state = "playing"
 
@@ -233,6 +256,9 @@ class Game:
         self.paddle.update(dt, self)
         for brick in self.bricks:
             brick.update(dt, self)
+        self.update_timers(dt)
+        self.update_powerups(dt)
+        self.update_bullets(dt)
         for ball in self.balls:
             ball.update(dt, self)
 
@@ -249,6 +275,84 @@ class Game:
         if not any(brick.alive for brick in self.bricks):
             self.finish_level()
 
+    def update_timers(self, dt):
+        if self.timers["expand"] > 0:
+            self.timers["expand"] = max(0.0, self.timers["expand"] - dt)
+            if self.timers["expand"] == 0:
+                self.paddle.target_width = 110
+
+        if self.timers["slow"] > 0:
+            self.timers["slow"] = max(0.0, self.timers["slow"] - dt)
+            if self.timers["slow"] == 0:
+                for ball in self.balls:
+                    if not ball.stuck:
+                        ball.scale_speed(1 / 0.72)
+
+        if self.timers["laser"] > 0:
+            self.timers["laser"] = max(0.0, self.timers["laser"] - dt)
+            if self.timers["laser"] == 0:
+                self.paddle.laser = False
+
+        self.laser_cooldown = max(0.0, self.laser_cooldown - dt)
+
+    def update_powerups(self, dt):
+        for powerup in list(self.powerups):
+            powerup.update(dt, self)
+            if not powerup.alive:
+                self.powerups.remove(powerup)
+            elif powerup.rect.colliderect(self.paddle.rect):
+                powerup.apply(self)
+                self.powerups.remove(powerup)
+                self.score += 15
+
+    def update_bullets(self, dt):
+        for bullet in list(self.bullets):
+            bullet.update(dt, self)
+            for brick in self.bricks:
+                if not brick.alive or not brick.rect.colliderect(bullet.rect):
+                    continue
+                bullet.alive = False
+                if isinstance(brick, SteelBrick):
+                    brick.hit()
+                elif brick.hit():
+                    self.destroy_brick(brick, drop=False)
+                break
+            if not bullet.alive and bullet in self.bullets:
+                self.bullets.remove(bullet)
+
+    def fire_laser(self):
+        if self.timers["laser"] <= 0 or self.laser_cooldown > 0:
+            return
+        top = self.paddle.rect.top - 12
+        self.bullets.append(Bullet(self.paddle.rect.left + 10, top))
+        self.bullets.append(Bullet(self.paddle.rect.right - 10, top))
+        self.laser_cooldown = 0.3
+
+    def activate_expand(self):
+        self.timers["expand"] = 12.0
+        self.paddle.target_width = 175
+
+    def activate_slow(self):
+        if self.timers["slow"] <= 0:
+            for ball in self.balls:
+                if not ball.stuck:
+                    ball.scale_speed(0.72)
+        self.timers["slow"] = 7.0
+
+    def activate_laser(self):
+        self.timers["laser"] = 8.0
+        self.paddle.laser = True
+
+    def spawn_extra_balls(self):
+        source = self.balls[0] if self.balls else None
+        speed = LEVELS[self.level_index].speed
+        base_x = source.pos_x if source else self.paddle.rect.centerx
+        base_y = source.pos_y if source else self.paddle.rect.top - 30
+        for angle in (-0.55, 0.55):
+            ball = Ball(base_x, base_y, speed)
+            ball.set_velocity(speed * angle, -abs(speed * 0.84))
+            self.balls.append(ball)
+
     def lose_life(self):
         self.lives -= 1
         if self.lives <= 0:
@@ -262,10 +366,13 @@ class Game:
         self.score += self.bonus
         self.state = "level_clear"
 
-    def destroy_brick(self, brick):
+    def destroy_brick(self, brick, drop=True):
         if brick in self.bricks:
             self.bricks.remove(brick)
         self.score += brick.points
+        if drop and self.bricks and len(self.powerups) < 4:
+            if random.random() < self.drop_chance:
+                self.powerups.append(random_powerup(brick.rect.centerx, brick.rect.centery))
         if isinstance(brick, BombBrick):
             self.explode(brick)
 
@@ -284,7 +391,7 @@ class Game:
             if not target.alive:
                 continue
             if target.hit(99):
-                self.destroy_brick(target)
+                self.destroy_brick(target, drop=False)
 
     def next_level(self):
         if self.level_index + 1 >= len(LEVELS):
@@ -372,9 +479,14 @@ class Game:
         for brick in self.bricks:
             if brick.alive:
                 brick.draw(self.screen)
+        for powerup in self.powerups:
+            powerup.draw(self.screen)
+        for bullet in self.bullets:
+            bullet.draw(self.screen)
         self.paddle.draw(self.screen)
         for ball in self.balls:
             ball.draw(self.screen)
+        self.draw_effect_badges()
         self.draw_hud()
 
     def draw_hud(self):
@@ -393,7 +505,22 @@ class Game:
         self.screen.blit(name, (WIDTH // 2 - name.get_width() // 2, 15))
 
         lives_label = self.font_tiny.render("NYAWA", True, MUTED)
-        self.screen.blit(lives_label, (WIDTH - 110, 5))
-        for i in range(3):
+        self.screen.blit(lives_label, (WIDTH - 148, 5))
+        for i in range(5):
             color = PINK if i < self.lives else (60, 66, 90)
             pygame.draw.circle(self.screen, color, (WIDTH - 34 - i * 22, 33), 6)
+
+    def draw_effect_badges(self):
+        """Info power up yang sedang aktif di kiri bawah."""
+        effects = [
+            ("expand", "PADDLE LEBAR", GREEN),
+            ("slow", "BOLA LAMBAT", NEON),
+            ("laser", "LASER", ORANGE),
+        ]
+        x = 18
+        y = HEIGHT - 26
+        for key, label, color in effects:
+            if self.timers[key] > 0:
+                text = self.font_tiny.render(f"{label} {self.timers[key]:.1f}s", True, color)
+                self.screen.blit(text, (x, y))
+                x += text.get_width() + 18
