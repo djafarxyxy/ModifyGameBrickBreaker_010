@@ -71,7 +71,7 @@ def draw_menu(surface, fonts, buttons, mouse_pos, best_score=0):
     title_font, subtitle_font = fonts
     draw_title(surface, "BRICK BREAKER", title_font, 120)
 
-    subtitle = subtitle_font.render("Tugas Multipatform - Implementasi OOP di GUI", True, MUTED)
+    subtitle = subtitle_font.render("Tugas Multipratform - Implementasi OOP di GUI", True, MUTED)
     surface.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, 205))
 
     if best_score:

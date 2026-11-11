@@ -575,7 +575,7 @@ class Game:
         name = self.font_small.render(f"LEVEL {self.level_index + 1} - {level.name.upper()}", True, NEON)
         self.screen.blit(name, (WIDTH // 2 - name.get_width() // 2, 15))
 
-        if self.combo >= 2:
+        if self.combo >= 4:
             multiplier = min(5, 1 + self.combo // 4)
             combo_text = self.font_tiny.render(f"COMBO x{multiplier}", True, YELLOW)
             self.screen.blit(combo_text, (126, 27))
