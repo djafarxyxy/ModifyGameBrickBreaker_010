@@ -3,7 +3,14 @@
 import pygame
 
 import ui
-from entities import Ball, Brick, Paddle, circle_rect_collision, reflect
+from entities import (
+    Ball,
+    BombBrick,
+    Paddle,
+    SteelBrick,
+    circle_rect_collision,
+    reflect,
+)
 from levels import LEVELS
 from settings import (
     BG_BOTTOM,
@@ -39,6 +46,7 @@ class Game:
         self.state = "menu"
         self.score = 0
         self.best_score = 0
+        self.bonus = 0
         self.lives = 3
         self.level_index = 0
         self.running = True
@@ -93,7 +101,7 @@ class Game:
     def load_level(self, index):
         self.level_index = index
         level = LEVELS[index]
-        self.bricks = level.build_bricks(Brick)
+        self.bricks = level.build_bricks()
         self.spawn_ball(level.speed)
 
     def spawn_ball(self, speed):
@@ -223,6 +231,8 @@ class Game:
             return
 
         self.paddle.update(dt, self)
+        for brick in self.bricks:
+            brick.update(dt, self)
         for ball in self.balls:
             ball.update(dt, self)
 
@@ -248,7 +258,33 @@ class Game:
             self.reset_after_life_lost()
 
     def finish_level(self):
+        self.bonus = 100 * (self.level_index + 1)
+        self.score += self.bonus
         self.state = "level_clear"
+
+    def destroy_brick(self, brick):
+        if brick in self.bricks:
+            self.bricks.remove(brick)
+        self.score += brick.points
+        if isinstance(brick, BombBrick):
+            self.explode(brick)
+
+    def explode(self, bomb):
+        """Bata bom meledak dan mengenai bata lain di sekitarnya."""
+        targets = []
+        for other in self.bricks:
+            if not other.alive or isinstance(other, SteelBrick):
+                continue
+            dx = other.rect.centerx - bomb.rect.centerx
+            dy = other.rect.centery - bomb.rect.centery
+            if (dx * dx + dy * dy) ** 0.5 <= bomb.explosion_radius:
+                targets.append(other)
+
+        for target in targets:
+            if not target.alive:
+                continue
+            if target.hit(99):
+                self.destroy_brick(target)
 
     def next_level(self):
         if self.level_index + 1 >= len(LEVELS):
@@ -286,8 +322,7 @@ class Game:
             ball.pos_y += normal[1] * 2
             ball.sync_rect()
             if brick.hit():
-                self.score += brick.points
-                self.bricks.remove(brick)
+                self.destroy_brick(brick)
             break
 
     # ------------------------------------------------------------------ render
@@ -328,7 +363,7 @@ class Game:
                     self.level_clear_buttons,
                     pygame.mouse.get_pos(),
                     LEVELS[self.level_index].name,
-                    0,
+                    self.bonus,
                 )
 
         pygame.display.flip()

@@ -1,6 +1,14 @@
 """Susunan bata untuk setiap level."""
 
+from entities import BombBrick, NormalBrick, SteelBrick, StrongBrick
 from settings import ROW_COLORS, WIDTH
+
+BRICK_TYPES = {
+    "1": NormalBrick,
+    "2": StrongBrick,
+    "3": SteelBrick,
+    "4": BombBrick,
+}
 
 
 class Level:
@@ -12,8 +20,7 @@ class Level:
         self.palette = palette or ROW_COLORS
         self.speed = speed
 
-    def build_bricks(self, brick_class):
-        rows = len(self.layout)
+    def build_bricks(self):
         cols = max(len(row) for row in self.layout)
         margin = 70
         gap = 6
@@ -24,12 +31,13 @@ class Level:
         bricks = []
         for row_index, row in enumerate(self.layout):
             for col_index, symbol in enumerate(row):
-                if symbol == ".":
+                brick_class = BRICK_TYPES.get(symbol)
+                if brick_class is None:
                     continue
                 x = margin + col_index * (brick_w + gap)
                 y = top + row_index * (brick_h + gap)
                 color = self.palette[row_index % len(self.palette)]
-                bricks.append(brick_class(x, y, brick_w, brick_h, color, 1, 10))
+                bricks.append(brick_class(x, y, brick_w, brick_h, color))
         return bricks
 
 
@@ -45,5 +53,42 @@ LEVELS = [
             "111111111111",
             "111111111111",
         ],
+        speed=430,
+    ),
+    Level(
+        "Benteng",
+        [
+            "..22222222..",
+            "..21111112..",
+            "..21133112..",
+            "..21111112..",
+            "..22222222..",
+            "....1111....",
+        ],
+        speed=455,
+    ),
+    Level(
+        "Zigzag",
+        [
+            "11..22..33..",
+            ".11..22..33.",
+            "..11..22..33",
+            "33..22..11..",
+            ".33..22..11.",
+            "..33..22..11",
+        ],
+        speed=480,
+    ),
+    Level(
+        "Kacau",
+        [
+            "4.2.3.2.4.2.",
+            ".2.4.2.3.4.2",
+            "3.2.4.2.2.4.",
+            ".4.3.2.4.3.2",
+            "2.4.2.3.2.4.",
+            "4.2.3.2.4.2.",
+        ],
+        speed=510,
     ),
 ]

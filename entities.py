@@ -156,20 +156,30 @@ class Ball(GameObject):
 
 
 class Brick(GameObject):
-    """Bata yang bisa dihancurkan dengan beberapa kali pukulan."""
+    """Bata dasar yang bisa dihancurkan dengan beberapa kali pukulan."""
 
-    def __init__(self, x, y, width, height, color, hp=1, points=10):
+    symbol = "1"
+    default_hp = 1
+    default_points = 10
+
+    def __init__(self, x, y, width, height, color, hp=None, points=None):
         super().__init__(x, y, width, height)
         self.color = color
-        self.max_hp = hp
-        self.hp = hp
-        self.points = points
+        self.max_hp = hp if hp is not None else self.default_hp
+        self.hp = self.max_hp
+        self.points = points if points is not None else self.default_points
+        self.flash = 0.0
 
     def hit(self, damage=1):
         self.hp -= damage
+        self.flash = 0.12
         if self.hp <= 0:
             self.alive = False
         return not self.alive
+
+    def update(self, dt, game):
+        if self.flash > 0:
+            self.flash = max(0.0, self.flash - dt)
 
     def draw(self, surface):
         pygame.draw.rect(surface, self.color, self.rect, border_radius=5)
@@ -186,9 +196,81 @@ class Brick(GameObject):
             (self.rect.right - 4, self.rect.bottom - 3),
             2,
         )
+        self.draw_mark(surface)
+
+        if self.flash > 0:
+            overlay = pygame.Surface(self.rect.size, pygame.SRCALPHA)
+            overlay.fill((255, 255, 255, 120))
+            surface.blit(overlay, self.rect.topleft)
+
+    def draw_mark(self, surface):
         if self.max_hp > 1:
             pygame.draw.circle(surface, (255, 255, 255), self.rect.center, 4)
             pygame.draw.circle(surface, self.color, self.rect.center, 2)
+
+
+class NormalBrick(Brick):
+    symbol = "1"
+    default_hp = 1
+    default_points = 10
+
+
+class StrongBrick(Brick):
+    symbol = "2"
+    default_hp = 2
+    default_points = 25
+
+    def draw_mark(self, surface):
+        pygame.draw.circle(surface, (255, 255, 255), self.rect.center, 4)
+        pygame.draw.circle(surface, self.color, self.rect.center, 2)
+        if self.hp < self.max_hp:
+            # garis retak kalau sudah kena sekali
+            left = (self.rect.centerx - 14, self.rect.centery - 6)
+            mid = (self.rect.centerx - 2, self.rect.centery + 1)
+            right = (self.rect.centerx + 12, self.rect.centery - 4)
+            pygame.draw.lines(surface, (20, 20, 30), False, [left, mid, right], 2)
+
+
+class SteelBrick(Brick):
+    """Bata baja, tidak bisa hancur dan cuma memantulkan bola."""
+
+    symbol = "3"
+    default_hp = 1
+    default_points = 0
+
+    def __init__(self, x, y, width, height, color, hp=None, points=None):
+        super().__init__(x, y, width, height, (150, 160, 182), 1, 0)
+
+    def hit(self, damage=1):
+        self.flash = 0.1
+        return False
+
+    def draw_mark(self, surface):
+        inner = self.rect.inflate(-14, -12)
+        pygame.draw.rect(surface, (118, 128, 150), inner, border_radius=3)
+        for x in range(inner.left + 4, inner.right - 2, 8):
+            pygame.draw.line(surface, (92, 100, 120), (x, inner.top + 2), (x, inner.bottom - 2), 1)
+
+
+class BombBrick(Brick):
+    """Bata bom, kalau pecah ikut meledakkan bata di sekitarnya."""
+
+    symbol = "4"
+    default_hp = 1
+    default_points = 20
+
+    def __init__(self, x, y, width, height, color, hp=None, points=None):
+        super().__init__(x, y, width, height, (255, 92, 92), 1, 20)
+
+    def draw_mark(self, surface):
+        center = self.rect.center
+        pygame.draw.circle(surface, (40, 30, 30), center, 7)
+        pygame.draw.circle(surface, (255, 190, 80), (center[0] + 4, center[1] - 5), 2)
+        pygame.draw.line(surface, (255, 220, 150), (center[0] + 1, center[1] - 6), (center[0] + 4, center[1] - 10), 2)
+
+    @property
+    def explosion_radius(self):
+        return 105
 
 
 def circle_rect_collision(ball, rect):
